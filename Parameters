@@ -1,0 +1,40 @@
+# 3D Barnes-Hut Algorithm for evolution of a galaxy 
+
+# Discrete time step [Gyr].
+1.e-2
+
+# Theta-criterion of Barnes-Hut algorithm.
+0.3
+
+# Number of bodies.
+1000
+
+# Initial radius of the distribution [Kpc]
+30
+
+# Inclination
+0
+
+# Longitud of ascending node
+0
+
+# Galaxy Model
+bessel_galaxy
+
+# Number of time-iterations executed by the program.
+100
+
+# Frequency at which data is written.
+20
+
+# Folder to save evolution images
+imagesBH/
+
+# Folder to save the data
+Data/
+
+# Format of files
+npy
+
+# Folder to save the images of tangent velocity
+Tangent_Velocity/
