@@ -6,8 +6,8 @@
 # Theta-criterion of Barnes-Hut algorithm.
 0.3
 
-# Number of bodies.
-1000
+# Number of bodies.º
+500
 
 # Initial radius of the distribution [Kpc]
 30
@@ -19,10 +19,10 @@
 0
 
 # Galaxy Model
-bessel_galaxy
+kepler_galaxy
 
 # Number of time-iterations executed by the program.
-100
+500
 
 # Frequency at which data is written.
 20

@@ -7,7 +7,9 @@ from scipy.optimize import fsolve
 import matplotlib.pyplot as plt
 from numpy.linalg import norm
 from copy import deepcopy
+from mpi4py import MPI
 from tqdm import tqdm
+import time
 
 ##### Simulation Parameters ###############################
 
@@ -149,16 +151,56 @@ def force_on(body, node, theta):
     # 3. Otherwise, run the procedure recursively on each child.
     return sum(force_on(body, c, theta) for c in node.child if c is not None)
 
+def force_on_parallel(bodiesP, shoot, theta, pId, nP, comm):
+    Force = []
+    for bodyP in bodiesP:
+        Force.append(force_on(bodyP,shoot,theta))
+    dst = (pId+1)%nP
+    scr = (pId-1+nP)%nP
+    shootT = shoot
+    shootT2 = shoot
+    for jj in range(nP-1):
+        if (pId%2==0):
+            comm.send(shootT, dst)
+            shootT = comm.recv(None, scr)
+            for ii in range(len(bodiesP)):
+                Force[ii] += force_on(bodiesP[ii],shootT,theta)
+        else:
+            shootT2 = comm.recv(None, scr)
+            comm.send(shootT,dst)
+            for ii in range(len(bodiesP)):
+                Force[ii] += force_on(bodiesP[ii],shootT2,theta)
+            shootT = shootT2
+    
+    """if pId == 0:
+        print(Force)"""
+    
+    return Force
+            
 def verlet(bodies, root, theta, dt):
+    '''--------------------------------------------------------------
+    Velocity-Verlet for time evolution.
+    --------------------------------------------------------------'''
+    for body in bodies:
+        body.momentum += 0.5*force_on(body, root, theta)*dt
+        print(force_on(body, root, theta))
+        body.m_pos += body.momentum*dt
+        print(force_on(body, root, theta)) 
+        body.momentum += 0.5*force_on(body, root, theta)*dt
+        print()
+
+def verlet_parallel(bodiesP, shoot, theta, dt, pId, nP, comm):
     '''--------------------------------------------------------------
     Velocity-Verlet method for time evolution.
     --------------------------------------------------------------'''
-    for body in bodies:
-        force = force_on(body, root, theta)
-        body.momentum += 0.5*force*dt
-        body.m_pos += body.momentum*dt
-        body.momentum += 0.5*force_on(body, root, theta)*dt
-    
+    Force = force_on_parallel(bodiesP, shoot, theta, pId, nP, comm)
+    for ii in range(len(bodiesP)):
+        bodiesP[ii].momentum += 0.5*Force[ii]*dt
+        bodiesP[ii].m_pos += bodiesP[ii].momentum*dt
+    Force = force_on_parallel(bodiesP, shoot, theta, pId, nP, comm)
+    for ii in range(len(bodiesP)):
+        bodiesP[ii].momentum += 0.5*Force[ii]*dt
+        
 def func(x,Distribution,Point): 
     """--------------------------------------------------------------
     Equation that follows the point of a wanted distribution that 
@@ -304,19 +346,63 @@ def evolve(bodies, N, n, ini_radius, save_step, data_folder='Data/', format='npy
     # Principal loop over n time iterations.
     for i in range(n+1):
         # The quad-tree is recomputed at each iteration.
+        start = time.process_time()   
         root = None
         for body in bodies:
             body.reset_location()
             root = add(body, root)
-
+        #print(f"Time taken in building the tree is: {time.process_time() - start}")
         # Evolution using the Verlet method
+        start = time.process_time() 
         verlet(bodies, root, theta, dt)
+        #print(f"Time taken in evolution is: {time.process_time() - start}")
         # Save the data in binary files
         if i%save_step==0:
             save_data(File, bodies, N)
             pbar.update(save_step)
     File.close()
-
+def evolve_parallel(comm, bodiesP, N, n, ini_radius, save_step, pId, nP, data_folder='Data/', format='npy', bodies = None):
+    '''--------------------------------------------------------------
+    This function evolves the system in n steps of time using the 
+    Verlet algorithm and the Barnes-Hut quad-tree.
+    --------------------------------------------------------------'''
+    # Scaling of gravitational constant
+    global G
+    G *= (0.4/ini_radius)**3
+    shoot = None
+    if 0 == pId:
+        File = open(data_folder + 'Evolution.' + format, 'wb')
+        print('Evolution progress:')
+        pbar = tqdm(total=n)
+        # Principal loop over n time iterations.
+        for i in range(n+1):
+            # The quad-tree is recomputed at each iteration. 
+            root = None
+            for body in bodies:
+                body.reset_location()
+                root = add(body, root)
+            start = time.process_time() 
+            shoot = comm.scatter([root.child[ii] for ii in range(nP)], root = 0)
+            # Evolution using the Verlet method
+            verlet_parallel(bodiesP, shoot, theta, dt, pId, nP, comm)
+            #print(f"Time taken in evolution is: {time.process_time() - start}")
+            bodiesG = comm.gather(bodiesP, 0)
+            bodies = []
+            for b in bodiesG:
+                bodies += b
+            # Save the data in binary files
+            if i%save_step==0:
+                save_data(File, bodies, N)
+                pbar.update(save_step)
+        File.close()
+    else: 
+        # Principal loop over n time iterations.
+        for i in range(n+1):
+            shoot = comm.scatter(shoot, root = 0)
+            verlet_parallel(bodiesP, shoot, theta, dt, pId, nP, comm)
+            comm.gather(bodiesP, 0)
+            
+            
 def save_data(File, bodies, N):
     '''--------------------------------------------------------------
     Save data of the current state of the bodies into File.
@@ -430,7 +516,7 @@ def tangent_velocity_distribution(N, n, ini_radius, save_step, data_folder='Data
             plt.close()
         pbar.update(1)      
         state = load(File)
-        Data = tangent_velocity(state[:, 0], state[:, 1:4], state[:, 4:7], N, normal_vector)
+        Data = tangent_velocity(state[:, 0], state[:, 1:3], state[:, 3:5], N)
         Data = factor*array(Data)
     File.close()
     Velocity.close()
@@ -447,7 +533,7 @@ def tangent_velocity(m, pos, momentum, N):
     for i in range(N):
         vel = momentum[i] / m[i] # Velocity
         r[i] = norm(pos[i]-center)   # radius
-        vt[i] = dot(vel, cross(pos[i]-center))/ norm(pos[i]-center)
+        vt[i] = sqrt(norm(vel)**2 - dot(vel, pos[i]-center)**2 / r[i]**2)
     return r, abs(vt)
 
 def read_model(model):
@@ -458,7 +544,5 @@ def read_model(model):
         return kepler_galaxy
     elif (model=='bessel_galaxy'):
         return bessel_galaxy
-    elif (model=='spiral_galaxy'):
-        return spiral_galaxy
     else:
         raise ValueError(f"Model {model} hasn't been defined.")

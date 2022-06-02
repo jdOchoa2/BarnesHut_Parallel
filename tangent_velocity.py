@@ -38,7 +38,7 @@ format = Data[11]
 image_folder = str(Data[12])
 
 start = time.time()
-tangent_velocity_distribution(N, n, ini_radius, save_step, Omega, i, data_folder, format, image_folder)
+tangent_velocity_distribution(N, n, ini_radius, save_step, data_folder, format, image_folder)
 create_video(image_folder, video_name)
 end = time.time()
 total_time = end - start

@@ -15,7 +15,6 @@ ini_radius = float(Data[3]) #kpc
 
 # Number of time-iterations executed by the program.
 n = int(Data[7])
-
 # Frequency at which data is written.
 save_step = int(Data[8])
 
